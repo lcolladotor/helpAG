@@ -1,0 +1,193 @@
+---
+output:
+  knitrBootstrap::bootstrap_document:
+    theme.chooser: TRUE
+    highlight.chooser: TRUE
+  html_document:
+    toc: true
+    theme: united
+---
+
+Help A. G.
+=========
+
+This document produces simulated data set similar to what A. G. has and runs the regressions covered in the TA session.
+
+# Data
+
+## Table
+
+First, we create some simulated data for two machines with sales for 5 years.
+
+```{r}
+set.seed(20150331)
+d <- data.frame(year = rep(2010:2014, each = 2), machine = factor(rep(c('EPIC', 'MP'), 5), levels = c('EPIC', 'MP')), sales = rnorm(10, 10000, 100))
+
+## Manually make it so EPIC machine has higher sales and much higher after
+## intervention
+d$sales[d$machine == 'EPIC' & d$year < 2012] <- rnorm(2, 40000, 200)
+d$sales[d$machine == 'EPIC' & d$year >= 2012] <- rnorm(3, 60000, 300)
+d$intervention <- ifelse(d$year < 2012, 0, 1)
+
+## Center year
+d$yearCen <- d$year - 2010
+knitr::kable(d, format = 'html', digits = 2)
+```
+
+## Vis
+
+Next, we can visualize it.
+
+```{r}
+library('ggplot2')
+ggplot(data = d, aes(x = year, y = sales, group = machine, colour = factor(intervention))) + geom_line() + geom_point()
+
+ggplot(data = d, aes(x = year, y = sales, group = paste0(machine, intervention), colour = machine, shape = factor(intervention))) + geom_line() + geom_point()
+```
+
+# Regression
+
+## Interaction
+
+Using the EPIC machine as the reference group, we can use MLR to fit a model with interaction between intervention and the machine.
+
+
+```{r}
+f <- lm(sales ~ yearCen + factor(intervention)*machine, data = d)
+summary(f)
+```
+
+Interpretations:
+
+* Intercept: sales for year 2010 for machine EPIC
+* yearCen: change in average sales for 1 year increase before the intervention, holding machine constant
+* factor(intervention)1 + yearCen: change in average sales for 1 year increase for machine EPIC after the intervention
+* machineMP + Intercept: sales for year 2010 for machine MP
+* factor(intervention)1:machineMP + factor(intervention)1 + yearCen: change in average sales for 1 year increase for machine MP after the intervention
+
+If _factor(intervention)1:machineMP_ is 0 that would mean that both machines have the same slopes after the intervention.
+
+## No interaction
+
+
+Or we can also fit the MLR without the machine variable (and also without the interaction term) for each of the machines.
+
+```{r}
+f.epic <- lm(sales ~ yearCen + factor(intervention), data = subset(d, machine == 'EPIC'))
+summary(f.epic)
+
+f.mp <- lm(sales ~ yearCen + factor(intervention), data = subset(d, machine == 'MP'))
+summary(f.mp)
+```
+
+Interpretations (relative to each machine):
+
+* Intercept: sales for year 2010
+* yearCen: change in average sales for 1 year increase before the intervention
+* factor(intervention)1 + yearCen: change in average sales for 1 year increase after the intervention
+
+_factor(intervention)1_ is the change in the slope after the intervention.
+
+# Stata
+
+Next, lets export the data and re-do the analysis with Stata.
+
+```{r}
+write.table(d, file = 'helpAG.txt', quote = FALSE, sep = '\t', row.names = FALSE)
+```
+
+## Commands
+
+Stata commands:
+
+```
+* Load data
+insheet using "/Users/lcollado/Desktop/helpAG.txt"
+
+* Model with interaction
+xi: regress sales yearcen i.intervention*i.machine
+
+* MLRs without interaction
+regress sales yearcen i.intervention if machine == "EPIC"
+regress sales yearcen i.intervention if machine == "MP"
+```
+
+## Output
+
+
+Stata log:
+
+```
+. insheet using "/Users/lcollado/Desktop/helpAG.txt"
+(5 vars, 10 obs)
+
+. xi: regress sales yearcen i.intervention*i.machine
+i.intervention    _Iintervent_0-1     (naturally coded; _Iintervent_0 omitted)
+i.machine         _Imachine_1-2       (_Imachine_1 for machine==EPIC omitted)
+i.int~n*i.mac~e   _IintXmac_#_#       (coded as above)
+
+      Source |       SS       df       MS              Number of obs =      10
+-------------+------------------------------           F(  4,     5) = 9349.41
+       Model |  4.9067e+09     4  1.2267e+09           Prob > F      =  0.0000
+    Residual |  656013.863     5  131202.773           R-squared     =  0.9999
+-------------+------------------------------           Adj R-squared =  0.9998
+       Total |  4.9073e+09     9   545258827           Root MSE      =  362.22
+
+-------------------------------------------------------------------------------
+        sales |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+--------------+----------------------------------------------------------------
+      yearcen |  -18.38291   161.9894    -0.11   0.914    -434.7898     398.024
+_Iintervent_1 |   20177.55   522.8184    38.59   0.000      18833.6     21521.5
+  _Imachine_2 |  -29982.61   362.2192   -82.77   0.000    -30913.72   -29051.49
+_IintXmac_1_2 |  -20110.96    467.623   -43.01   0.000    -21313.02   -18908.89
+        _cons |   39937.35    268.629   148.67   0.000     39246.82    40627.88
+-------------------------------------------------------------------------------
+
+. regress sales yearcen i.intervention if machine == "EPIC"
+
+      Source |       SS       df       MS              Number of obs =       5
+-------------+------------------------------           F(  2,     2) =  812.40
+       Model |   486375001     2   243187500           Prob > F      =  0.0012
+    Residual |   598685.85     2  299342.925           R-squared     =  0.9988
+-------------+------------------------------           Adj R-squared =  0.9975
+       Total |   486973687     4   121743422           Root MSE      =  547.12
+
+------------------------------------------------------------------------------
+       sales |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     yearcen |  -123.0898   346.0306    -0.36   0.756    -1611.939     1365.76
+1.interven~n |   20439.32   998.9043    20.46   0.002     16141.38    24737.25
+       _cons |    39989.7   423.7992    94.36   0.000     38166.24    41813.16
+------------------------------------------------------------------------------
+
+. regress sales yearcen i.intervention if machine == "MP"
+
+      Source |       SS       df       MS              Number of obs =       5
+-------------+------------------------------           F(  2,     2) =    7.62
+       Model |  19140.4723     2  9570.23614           Prob > F      =  0.1159
+    Residual |  2510.30333     2  1255.15167           R-squared     =  0.8841
+-------------+------------------------------           Adj R-squared =  0.7681
+       Total |  21650.7756     4   5412.6939           Root MSE      =  35.428
+
+------------------------------------------------------------------------------
+       sales |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     yearcen |   86.32402   22.40671     3.85   0.061    -10.08427    182.7323
+1.interven~n |  -195.1768    64.6826    -3.02   0.095    -473.4835    83.13001
+       _cons |   9902.389    27.4425   360.84   0.000     9784.314    10020.46
+------------------------------------------------------------------------------
+
+. 
+```
+
+
+
+# Reproducibility
+
+```{r}
+options(width = 120)
+devtools::session_info()
+```
+
+
+
